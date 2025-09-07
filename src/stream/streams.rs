@@ -1,0 +1,67 @@
+use std::sync::atomic::AtomicU64;
+
+use bytes::Bytes;
+
+use crate::stream::stream_id::StreamId;
+
+static STREAM_INDEX: AtomicU64 = AtomicU64::new(0);
+
+fn next_index() -> u64 {
+    STREAM_INDEX.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+}
+
+#[derive(Debug)]
+///A Stream is a contiguous byte memory which contains an ID and can be sent out of order.
+pub struct Stream {
+    ///The actual contents to be sent
+    pub(crate) content: Bytes,
+    ///The ID of this stream. Read https://datatracker.ietf.org/doc/html/rfc9000 at 2.0 to 2.1 to understand better about this field
+    pub(crate) id: StreamId,
+    ///The offset the contents are being at. When something is sent, as it might be out of order, we send the offset to know where to start reading from
+    pub(crate) offset: u64,
+}
+
+impl Stream {
+    #[inline]
+    pub fn from_raw(id: u64, offset: u64, bytes: Bytes) -> Self {
+        Self {
+            content: bytes,
+            id: StreamId::from_raw(id),
+            offset,
+        }
+    }
+    #[inline]
+    ///Creates a new UniDirectional Stream with the given `bytes`
+    pub fn new_unidirectional(initiator: super::stream_id::InitiatorType, bytes: Bytes) -> Self {
+        Self {
+            content: bytes,
+            id: StreamId::new(
+                initiator,
+                super::stream_id::StreamType::UniDirectional,
+                next_index(),
+            ),
+            offset: 0,
+        }
+    }
+
+    #[inline]
+    ///Creates a new UniDirectional Stream with the given `bytes`
+    pub fn new_bidirectional(initiator: super::stream_id::InitiatorType, bytes: Bytes) -> Self {
+        Self {
+            content: bytes,
+            id: StreamId::new(
+                initiator,
+                super::stream_id::StreamType::BiDirectional,
+                next_index(),
+            ),
+            offset: 0,
+        }
+    }
+
+    pub fn serialize_into(&self, buf: &mut Vec<u8>) {
+        buf.extend_from_slice(&self.id.raw().to_be_bytes());
+        buf.extend_from_slice(&self.offset.to_be_bytes());
+        buf.extend_from_slice(&self.content.len().to_be_bytes());
+        buf.extend_from_slice(&self.content);
+    }
+}
