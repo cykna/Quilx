@@ -1,11 +1,12 @@
+mod dencode;
 use std::{collections::VecDeque, net::SocketAddr};
 
 use bytes::Bytes;
 
-use crate::stream::Stream;
+use crate::{dencode::Dencode, frames::Stream};
 
 mod connections;
-mod stream;
+mod frames;
 
 #[derive(Debug)]
 pub enum EndPointError {
@@ -17,7 +18,7 @@ pub enum EndPointError {
 pub struct QuicEndpoint {
     addr: Option<SocketAddr>,
     udp: tokio::net::UdpSocket,
-    queue: VecDeque<stream::Stream>,
+    queue: VecDeque<frames::Frame>,
 }
 
 impl QuicEndpoint {
@@ -28,28 +29,23 @@ impl QuicEndpoint {
             queue: VecDeque::new(),
         })
     }
-    ///Appends the given `content` on the streams queue for when being requested to be sent
-    pub fn append(&mut self, content: &[u8]) {
-        let stream = Stream::new_bidirectional(
-            stream::stream_id::InitiatorType::Client,
-            Bytes::copy_from_slice(content),
-        );
-        self.queue.push_back(stream);
+
+    pub fn append_frame(&mut self, frame: frames::Frame) {
+        self.queue.push_front(frame);
     }
 
     ///Sends the next stream on the queue and returns the amount of bytes sent
     pub async fn send(&mut self) -> Result<usize, EndPointError> {
-        if let Some(ref target) = self.addr {
-            let next = self.queue.pop_front().ok_or(EndPointError::NoStream)?;
-            let mut content = Vec::with_capacity(1200);
-            next.serialize_into(&mut content);
-            self.udp
-                .send_to(&content, target)
-                .await
-                .map_err(EndPointError::Io)
-        } else {
-            Err(EndPointError::NoTarget)
-        }
+        let Some(ref target) = self.addr else {
+            return Err(EndPointError::NoTarget);
+        };
+        let next = self.queue.pop_front().ok_or(EndPointError::NoStream)?;
+        let mut content = Vec::with_capacity(1200);
+        next.encode(&mut content);
+        self.udp
+            .send_to(&content, target)
+            .await
+            .map_err(EndPointError::Io)
     }
 
     ///Receives the incomming bytes and converts them into a stream vector
