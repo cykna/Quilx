@@ -14,6 +14,7 @@ pub enum FrameType {
     Stream = 0x8, //as it goes from 0x8 to 0xf, the next values must be >0xf
 }
 
+#[derive(Debug)]
 ///An Abstraction over the possible frames QUIC can have. When using this to send data, first it will be encoded on a way that is equivalent to
 ///what the specifications say.
 pub enum Frame {

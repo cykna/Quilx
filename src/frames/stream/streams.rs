@@ -1,4 +1,4 @@
-use std::{marker::PhantomData, ops::Deref, sync::atomic::AtomicU64};
+use std::{ops::Deref, sync::atomic::AtomicU64};
 
 use bytes::Bytes;
 

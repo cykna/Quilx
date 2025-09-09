@@ -2,6 +2,7 @@
 
 use bytes::Bytes;
 
+#[derive(Debug)]
 pub enum DencodeError {}
 
 ///Trait used for encoding/decoding data on Quilx

@@ -78,7 +78,7 @@ impl std::fmt::Debug for StreamId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("StreamId")
             .field("index", &self.index())
-            .field("initiator", &self.stream_type())
+            .field("initiator", &self.initiator_type())
             .field("direction", &self.stream_type())
             .finish()
     }

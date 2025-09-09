@@ -41,30 +41,25 @@ impl QuicEndpoint {
         };
         let next = self.queue.pop_front().ok_or(EndPointError::NoStream)?;
         let mut content = Vec::with_capacity(1200);
-        next.encode(&mut content);
+        content.resize(1200, 0);
+        let amount = next.encode(&mut content);
         self.udp
-            .send_to(&content, target)
+            .send_to(&content[..amount], target)
             .await
             .map_err(EndPointError::Io)
     }
 
     ///Receives the incomming bytes and converts them into a stream vector
-    pub async fn recv(&mut self) -> std::io::Result<Vec<Stream>> {
+    pub async fn recv(&mut self) -> std::io::Result<Vec<frames::Frame>> {
         let mut buf = Vec::with_capacity(1200);
         buf.resize(1200, 0);
         let byte_amount = self.udp.recv(&mut buf).await?;
         let mut out = Vec::new();
         let mut idx = 0;
         while idx < byte_amount {
-            let stream_id = u64::from_be_bytes(buf[idx..idx + 8].try_into().unwrap());
-            idx += 8;
-            let offset = u64::from_be_bytes(buf[idx..idx + 8].try_into().unwrap());
-            idx += 8;
-            let len = u64::from_be_bytes(buf[idx..idx + 8].try_into().unwrap()) as usize;
-            idx += 8;
-            let bytes = Bytes::copy_from_slice(&buf[idx..idx + len]);
-            idx += len;
-            out.push(Stream::from_raw(stream_id, offset, bytes));
+            let (decoded, size) = frames::Frame::decode(&buf[idx..byte_amount]).unwrap();
+            idx += size;
+            out.push(decoded);
         }
         Ok(out)
     }
@@ -91,8 +86,12 @@ async fn main() {
         let stdin = std::io::stdin();
         let mut buf = String::new();
         while let Ok(s) = stdin.read_line(&mut buf) {
-            writer.append(buf.as_bytes());
+            writer.append_frame(frames::Frame::Stream(Stream::new_unidirectional(
+                frames::stream_id::InitiatorType::Client,
+                Bytes::copy_from_slice(&buf.as_bytes()[..s]),
+            )));
             writer.send().await.unwrap();
+            buf.clear();
         }
     });
     rx.await.unwrap();
