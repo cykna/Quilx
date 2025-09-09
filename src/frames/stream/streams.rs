@@ -1,6 +1,6 @@
-use std::{ops::Deref, sync::atomic::AtomicU64};
+use std::{io::Cursor, ops::Deref, sync::atomic::AtomicU64};
 
-use bytes::Bytes;
+use bytes::{Bytes, BytesMut};
 
 use crate::dencode::Dencode;
 
@@ -24,6 +24,14 @@ pub struct Stream {
 }
 
 impl Stream {
+    pub fn new(id: StreamId, offset: u64, content: Bytes) -> Self {
+        Self {
+            content,
+            id,
+            offset,
+        }
+    }
+
     #[inline]
     pub fn from_raw(id: u64, offset: u64, bytes: Bytes) -> Self {
         Self {
@@ -59,13 +67,6 @@ impl Stream {
             offset: 0,
         }
     }
-
-    pub fn serialize_into(&self, buf: &mut Vec<u8>) {
-        buf.extend_from_slice(&self.id.raw().to_be_bytes());
-        buf.extend_from_slice(&self.offset.to_be_bytes());
-        buf.extend_from_slice(&self.content.len().to_be_bytes());
-        buf.extend_from_slice(&self.content);
-    }
 }
 
 impl Deref for Stream {
@@ -76,24 +77,18 @@ impl Deref for Stream {
 }
 
 impl Dencode for Stream {
-    fn encode(&self, buf: &mut [u8]) -> usize {
-        let mut offset = 0;
-        offset += self.id.encode(&mut buf[offset..]);
-        offset += self.offset.encode(&mut buf[offset..]);
-        offset += (self.content.len() as u64).encode(&mut buf[offset..]);
-        offset += self.content.encode(&mut buf[offset..]);
-        offset
+    fn encode(&self, buf: &mut BytesMut) {
+        self.id.encode(buf);
+        self.offset.encode(buf);
+        (self.content.len() as u64).encode(buf);
+        self.content.encode(buf);
     }
-    fn decode(buf: &[u8]) -> Result<(Self, usize), crate::dencode::DencodeError> {
-        let mut offset = 0;
-        let (id, amount) = StreamId::decode(&buf[offset..])?;
-        offset += amount;
-        let (stream_offset, amount) = u64::decode(&buf[offset..])?;
-        offset += amount;
-        let (len, amount) = u64::decode(&buf[offset..])?;
-        offset += amount;
-        let (bytes, amount) = Bytes::decode(&buf[offset..offset + len as usize])?;
-        offset += amount;
-        Ok((Self::from_raw(id.raw(), stream_offset, bytes), offset))
+    fn decode(buf: &mut Bytes) -> Result<Self, crate::dencode::DencodeError> {
+        let id = StreamId::decode(buf)?;
+        let stream_offset = u64::decode(buf)?;
+
+        let _ = u64::decode(buf)?;
+        let bytes = Bytes::decode(buf)?;
+        Ok(Self::new(id, stream_offset, bytes))
     }
 }

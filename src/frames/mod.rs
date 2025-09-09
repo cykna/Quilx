@@ -1,4 +1,7 @@
+mod crypto;
 mod stream;
+use bytes::{Buf, BufMut, Bytes, BytesMut};
+pub use crypto::*;
 pub use stream::*;
 
 use crate::dencode::Dencode;
@@ -11,7 +14,23 @@ use crate::dencode::Dencode;
 pub enum FrameType {
     Padding = 0x00,
     Ping = 0x01,
-    Stream = 0x8, //as it goes from 0x8 to 0xf, the next values must be >0xf
+    Crypto = 0x06,
+    Stream = 0x7, //as it goes from 0x8 to 0xf, the next values must be >0xf
+}
+
+impl Dencode for FrameType {
+    fn encode(&self, buf: &mut BytesMut) {
+        buf.put_u8(self.clone() as u8);
+    }
+    fn decode(buf: &mut bytes::Bytes) -> Result<Self, crate::dencode::DencodeError> {
+        Ok(match buf.get_u8() {
+            0x0 => Self::Padding,
+            0x1 => Self::Ping,
+            0x6 => Self::Crypto,
+            0x7..0xf => Self::Stream,
+            _ => panic!("Unrecognized frame type"),
+        })
+    }
 }
 
 #[derive(Debug)]
@@ -20,6 +39,7 @@ pub enum FrameType {
 pub enum Frame {
     Padding,
     Ping,
+    Crypto(Crypto),
     Stream(Stream),
 }
 
@@ -32,6 +52,10 @@ impl Frame {
     pub fn new_ping() -> Self {
         Self::Ping
     }
+
+    pub fn new_crypto(crypto: Crypto) -> Self {
+        Self::Crypto(crypto)
+    }
     ///Creates a new Stream Frame
     pub fn new_stream(stream: Stream) -> Self {
         Self::Stream(stream)
@@ -42,33 +66,35 @@ impl Frame {
         match self {
             Self::Padding => FrameType::Padding,
             Self::Ping => FrameType::Ping,
+            Self::Crypto(_) => FrameType::Crypto,
             Self::Stream(_) => FrameType::Stream,
         }
     }
 }
 
 impl Dencode for Frame {
-    fn encode(&self, buf: &mut [u8]) -> usize {
+    fn encode(&self, buf: &mut BytesMut) {
+        self.frame_type().encode(buf);
         match self {
-            Self::Padding | Self::Ping => {
-                buf[0] = self.frame_type() as u8;
-                1
-            }
-            Self::Stream(s) => {
-                buf[0] = self.frame_type() as u8;
-                let out = s.encode(&mut buf[1..]);
-                out + 1
-            }
+            Self::Padding | Self::Ping => {}
+            Self::Stream(s) => s.encode(buf),
+            Self::Crypto(s) => s.encode(buf),
         }
     }
-    fn decode(buf: &[u8]) -> Result<(Self, usize), crate::dencode::DencodeError> {
-        match buf[0] {
-            n if n == FrameType::Padding as u8 => Ok((Self::Padding, 1)),
-            n if n == FrameType::Ping as u8 => Ok((Self::Ping, 1)),
+    fn decode(buf: &mut Bytes) -> Result<Self, crate::dencode::DencodeError> {
+        let ty = buf.get_u8();
+        match ty {
+            n if n == FrameType::Padding as u8 => Ok(Self::Padding),
+            n if n == FrameType::Ping as u8 => Ok(Self::Ping),
             n if n == FrameType::Stream as u8 => {
-                let (stream, amount) = Stream::decode(&buf[1..])?;
-                Ok((Self::new_stream(stream), amount + 1))
+                let stream = Stream::decode(buf)?;
+                Ok(Self::new_stream(stream))
             }
+            n if n == FrameType::Crypto as u8 => {
+                let crypto = Crypto::decode(buf)?;
+                Ok(Self::Crypto(crypto))
+            }
+
             n => panic!("Invalid or not implemented value {n}"),
         }
     }

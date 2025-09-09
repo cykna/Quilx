@@ -1,3 +1,5 @@
+use bytes::{Buf, BufMut, Bytes, BytesMut};
+
 use crate::dencode::Dencode;
 
 ///Enum determining who defined initialized a specific STREAM frame
@@ -62,15 +64,13 @@ impl StreamId {
 }
 
 impl Dencode for StreamId {
-    fn encode(&self, buf: &mut [u8]) -> usize {
-        let bytes = self.0.to_be_bytes();
-        buf[0..bytes.len()].copy_from_slice(&bytes);
-        bytes.len()
+    fn encode(&self, buf: &mut BytesMut) {
+        buf.put_u64(self.0);
     }
-    fn decode(buf: &[u8]) -> Result<(Self, usize), crate::dencode::DencodeError> {
-        let raw_value =
-            unsafe { Self::from_raw(u64::from_be_bytes(buf[0..8].try_into().unwrap())) };
-        Ok((raw_value, 8))
+    fn decode(buf: &mut Bytes) -> Result<Self, crate::dencode::DencodeError> {
+        let raw = buf.get_u64();
+        let raw_value = unsafe { Self::from_raw(raw) };
+        Ok(raw_value)
     }
 }
 
