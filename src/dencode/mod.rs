@@ -18,8 +18,7 @@ impl Dencode for bytes::Bytes {
         buf.put_slice(&self[..]);
     }
     fn decode(buf: &mut Bytes) -> Result<Self, DencodeError> {
-        let len = buf.len();
-        Ok(buf.clone())
+        Ok(buf.copy_to_bytes(buf.remaining()))
     }
 }
 

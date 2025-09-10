@@ -4,7 +4,7 @@ use std::{
     net::SocketAddr,
 };
 
-use bytes::{Bytes, BytesMut};
+use bytes::{Buf, Bytes, BytesMut};
 
 use crate::{connections::Connection, dencode::Dencode, frames::Stream};
 
@@ -44,13 +44,14 @@ impl QuicEndpoint {
     pub async fn send(&mut self, addr: SocketAddr) -> Result<usize, EndPointError> {
         let next = self.queue.pop_front().ok_or(EndPointError::NoStream)?;
         let mut content = BytesMut::with_capacity(1200);
-
         next.encode(&mut content);
+
         let slice = &content.split().freeze()[..];
+
         self.udp
             .send_to(slice, addr)
             .await
-            .map_err(EndPointError::Io);
+            .map_err(EndPointError::Io)?;
         Ok(slice.len())
     }
 
@@ -63,14 +64,13 @@ impl QuicEndpoint {
     ///Receives the incomming bytes and converts them into a stream vector
     pub async fn recv(&mut self) -> std::io::Result<Vec<frames::Frame>> {
         let mut buf = BytesMut::with_capacity(1200);
-        let (mut buf, read_amount) = {
-            let byte_amount = self.udp.recv(&mut buf).await?;
-            (buf.split().freeze(), byte_amount)
-        };
+        buf.resize(1200, 0);
+        let read_amount = self.recv_into(&mut buf).await?;
+        let mut buf = buf.split().freeze().slice(0..read_amount);
         let mut out = Vec::new();
 
-        while buf.len() < read_amount {
-            println!("{}", buf.len());
+        while buf.remaining() > 0 {
+            println!("{} {}", buf.len(), buf.remaining());
             let decoded = frames::Frame::decode(&mut buf).unwrap();
             out.push(decoded);
         }

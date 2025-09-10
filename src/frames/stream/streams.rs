@@ -1,6 +1,6 @@
 use std::{io::Cursor, ops::Deref, sync::atomic::AtomicU64};
 
-use bytes::{Bytes, BytesMut};
+use bytes::{Buf, Bytes, BytesMut};
 
 use crate::dencode::Dencode;
 
@@ -89,6 +89,7 @@ impl Dencode for Stream {
 
         let _ = u64::decode(buf)?;
         let bytes = Bytes::decode(buf)?;
+
         Ok(Self::new(id, stream_offset, bytes))
     }
 }

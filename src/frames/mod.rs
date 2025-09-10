@@ -75,6 +75,7 @@ impl Frame {
 impl Dencode for Frame {
     fn encode(&self, buf: &mut BytesMut) {
         self.frame_type().encode(buf);
+
         match self {
             Self::Padding | Self::Ping => {}
             Self::Stream(s) => s.encode(buf),
