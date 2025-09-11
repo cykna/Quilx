@@ -1,4 +1,5 @@
 mod dencode;
+mod helpers;
 use std::{
     collections::{HashMap, VecDeque},
     net::SocketAddr,
@@ -6,7 +7,7 @@ use std::{
 
 use bytes::{Buf, Bytes, BytesMut};
 
-use crate::{connections::Connection, dencode::Dencode, frames::Stream};
+use crate::{connections::QuicConnection, dencode::Dencode, frames::Stream};
 
 mod connections;
 mod frames;
@@ -19,7 +20,7 @@ pub enum EndPointError {
 }
 
 pub struct QuicEndpoint {
-    connections: HashMap<SocketAddr, Connection>,
+    connections: HashMap<SocketAddr, QuicConnection>,
     udp: tokio::net::UdpSocket,
     queue: VecDeque<frames::Frame>,
 }
@@ -34,7 +35,7 @@ impl QuicEndpoint {
     }
 
     ///Attempts to connect this Endpoint with an endpoint with the provided address `addr` and returns the connection generated
-    pub fn connect_to(&mut self, addr: SocketAddr) /* -> Result<&Connection, ()>*/ {}
+    pub fn connect_to(&mut self, addr: SocketAddr) /* -> Result<&QuicConnection, ()>*/ {}
 
     pub fn append_frame(&mut self, frame: frames::Frame) {
         self.queue.push_front(frame);
