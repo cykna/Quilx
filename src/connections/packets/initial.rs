@@ -46,7 +46,7 @@ impl InitialPacket {
     pub fn push_frame(&mut self, frame: frames::Frame) {
         let mut buf = BytesMut::new();
         frame.encode(&mut buf);
-        self.packets.extend_from_slice(&buf[..]);
+        self.packets.extend_from_slice(&buf);
     }
 
     ///Fills the `packets` of this header with `PADDING` until the length in bytes is the minimum required by QUIC as defined on Section 14.1

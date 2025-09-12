@@ -87,8 +87,8 @@ impl Dencode for Stream {
         let id = StreamId::decode(buf)?;
         let stream_offset = u64::decode(buf)?;
 
-        let _ = u64::decode(buf)?;
-        let bytes = Bytes::decode(buf)?;
+        let len = u64::decode(buf)? as usize;
+        let bytes = buf.copy_to_bytes(len);
 
         Ok(Self::new(id, stream_offset, bytes))
     }

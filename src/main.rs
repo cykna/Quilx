@@ -49,7 +49,7 @@ impl QuicEndpoint {
     ) -> std::io::Result<usize> {
         let mut buf = BytesMut::new();
         packet.encode(&mut buf);
-        self.udp.send_to(&buf[..], addr).await
+        self.udp.send_to(&buf, addr).await
     }
 
     ///Attempts to connect this Endpoint with an endpoint with the provided address `addr` and returns the connection generated
@@ -62,9 +62,19 @@ impl QuicEndpoint {
         initial.fill_padding();
         self.send_immediatly(QuicPacket::Initial(initial), addr)
             .await?;
-        let (data, ty, addr) = self.recv().await?;
+        let (ref mut data, ty, new_addr) = self.recv().await?;
 
-        println!("{ty:?} {data:?} ue",);
+        match ty {
+            DataType::Packet => {
+                let packet = QuicPacket::decode(data).unwrap();
+                let frames = packet
+                    .frames()
+                    .into_iter()
+                    .filter(|v| !matches!(v, frames::Frame::Padding))
+                    .collect::<Vec<_>>();
+                println!("{frames:?}");
+            }
+        }
         Ok(())
     }
 
@@ -125,19 +135,24 @@ async fn main() {
                         .into_iter()
                         .filter(|v| !matches!(v, frames::Frame::Padding))
                         .collect::<Vec<_>>();
-                    let frames::Frame::Crypto(ref crypto) = frames[0] else {
+                    let frames::Frame::Crypto(_) = frames[0] else {
                         panic!("Not a crypto")
                     };
-                    receiver.append_frame(frames::Frame::Stream(Stream::new(
+                    let mut packet = InitialPacket::new();
+                    packet.push_frame(frames::Frame::Stream(Stream::new(
                         StreamId::new(
                             frames::stream_id::InitiatorType::Server,
                             frames::stream_id::StreamType::BiDirectional,
                             0,
                         ),
                         0,
-                        Bytes::from("cool your message"),
+                        Bytes::copy_from_slice(b"Cool your message buddy"),
                     )));
-                    receiver.send(addr).await?;
+                    packet.fill_padding();
+                    receiver
+                        .send_immediatly(QuicPacket::Initial(packet), addr)
+                        .await
+                        .map_err(EndPointError::Io)?;
                 }
             }
         }
