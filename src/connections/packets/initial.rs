@@ -10,20 +10,35 @@ pub const INITIAL_PACKET_MINIMUM_SIZE: usize = 1200;
 
 pub struct InitialPacket {
     long: LongHeader,
+
     ///The token received by NEW_TOKEN frame, or at a retry packet. Note that this is empty on trying to implement a handshake
     token: Vec<u8>,
-    //already serialized frames
+    ///Numeric value of the stream
+    stream_number: u32,
+    ///already serialized frames
     packets: Vec<u8>,
 }
 
 impl InitialPacket {
-    pub fn new(header_config: LongHeaderParams) -> Self {
+    pub fn new() -> Self {
         Self {
-            long: LongHeader::new(header_config),
+            long: LongHeader::new(LongHeaderParams {
+                version: 1,
+                ty: super::LongHeaderType::Initial,
+                reserved: 0b11,
+            }),
+            stream_number: 0,
             token: Vec::new(),
             packets: Vec::new(),
         }
     }
+
+    #[inline]
+    ///Retrieves the numeric length of the packet number
+    pub fn stream_num_len(&self) -> usize {
+        self.long.first_byte as usize & 0b11
+    }
+
     ///Appends the given `frame` on this packet
     pub fn push_frame(&mut self, frame: frames::Frame) {
         let mut buf = BytesMut::new();
@@ -40,6 +55,7 @@ impl InitialPacket {
         }
     }
 
+    #[inline]
     ///Retrieves the length in bytes this header takes
     pub fn len(&self) -> usize {
         let u8_len = std::mem::size_of::<u8>();
@@ -58,7 +74,9 @@ impl Dencode for InitialPacket {
             !self.packets.is_empty(),
             "Cannot send packet whose size is 0"
         );
-        (self.packets.len() as u64).encode(buf);
+
+        ((self.packets.len() + self.stream_num_len()) as u64).encode(buf);
+        self.stream_number.encode(buf);
         self.packets.encode(buf);
     }
     fn decode(buf: &mut bytes::Bytes) -> Result<Self, crate::dencode::DencodeError> {
@@ -68,6 +86,16 @@ impl Dencode for InitialPacket {
             let bytes = buf.copy_to_bytes(size);
             bytes.to_vec()
         };
+        let stream_number = {
+            let size = long.first_byte & 0b11;
+            match size {
+                0 => buf.get_u8() as u32,
+                1 => buf.get_u16() as u32,
+                2 => (buf.get_u16() << 8 | buf.get_u8() as u16) as u32,
+                3 => buf.get_u32(),
+                _ => unreachable!(),
+            }
+        };
         let packets = {
             let size = buf.get_u64() as usize;
             let bytes = buf.copy_to_bytes(size);
@@ -75,6 +103,7 @@ impl Dencode for InitialPacket {
         };
         Ok(Self {
             long,
+            stream_number,
             token,
             packets,
         })
