@@ -1,4 +1,4 @@
-use bytes::{Buf, BytesMut};
+use bytes::Buf;
 
 use crate::dencode::Dencode;
 
@@ -12,6 +12,19 @@ pub enum LongHeaderType {
     Retry,
 }
 
+impl From<u8> for LongHeaderType {
+    fn from(value: u8) -> Self {
+        match value & 0b11 {
+            0 => Self::Initial,
+            1 => Self::ZeroRTT,
+            2 => Self::Handshake,
+            3 => Self::Retry,
+            _ => unreachable!(),
+        }
+    }
+}
+
+#[derive(Debug)]
 ///Long Header defined in Section 17.2 of QUIC specification, which is used to transfer data between based on it's type.
 ///Note that all the fields are in order of appearance on the QUIC representation of it
 pub struct LongHeader {

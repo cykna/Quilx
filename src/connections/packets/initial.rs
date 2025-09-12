@@ -1,4 +1,4 @@
-use bytes::{Buf, BytesMut};
+use bytes::{Buf, Bytes, BytesMut};
 
 use crate::{
     connections::{LongHeader, LongHeaderParams},
@@ -8,6 +8,8 @@ use crate::{
 
 pub const INITIAL_PACKET_MINIMUM_SIZE: usize = 1200;
 
+#[derive(Debug)]
+///Initial Packet is a Header type used primary to send data to stablish a handshake, it is defined at section 17.2.2
 pub struct InitialPacket {
     long: LongHeader,
 
@@ -20,6 +22,7 @@ pub struct InitialPacket {
 }
 
 impl InitialPacket {
+    ///Initializes a new InitialPacket with QUIC version of 1 and stream number size of 4bytes
     pub fn new() -> Self {
         Self {
             long: LongHeader::new(LongHeaderParams {
@@ -48,10 +51,9 @@ impl InitialPacket {
 
     ///Fills the `packets` of this header with `PADDING` until the length in bytes is the minimum required by QUIC as defined on Section 14.1
     pub fn fill_padding(&mut self) {
-        let remaining = self.len() - self.packets.len();
-        if remaining > 0 {
+        if self.len() < INITIAL_PACKET_MINIMUM_SIZE {
             self.packets
-                .resize(INITIAL_PACKET_MINIMUM_SIZE - remaining, 0); //0 == Padding, as defined at 19.1
+                .resize(INITIAL_PACKET_MINIMUM_SIZE - self.len(), 0); //0 == Padding, as defined at 19.1
         }
     }
 
@@ -60,6 +62,12 @@ impl InitialPacket {
     pub fn len(&self) -> usize {
         let u8_len = std::mem::size_of::<u8>();
         self.long.len() + (u8_len * self.token.len()) + (u8_len * self.packets.len())
+    }
+
+    #[inline]
+    ///Retrieves all the frames this Header contains
+    pub fn frames(&self) -> Vec<frames::Frame> {
+        Vec::decode(&mut Bytes::copy_from_slice(&self.packets)).unwrap()
     }
 }
 
@@ -83,11 +91,13 @@ impl Dencode for InitialPacket {
         let long = LongHeader::decode(buf)?;
         let token = {
             let size = buf.get_u64() as usize;
-            let bytes = buf.copy_to_bytes(size);
-            bytes.to_vec()
+            buf.copy_to_bytes(size).to_vec()
         };
+
+        let mut len = buf.get_u64() as usize;
         let stream_number = {
-            let size = long.first_byte & 0b11;
+            let size = long.first_byte & 0b11; //length of stream number
+            len -= size as usize + 1; //len = packets_size + stream_number_size
             match size {
                 0 => buf.get_u8() as u32,
                 1 => buf.get_u16() as u32,
@@ -96,11 +106,7 @@ impl Dencode for InitialPacket {
                 _ => unreachable!(),
             }
         };
-        let packets = {
-            let size = buf.get_u64() as usize;
-            let bytes = buf.copy_to_bytes(size);
-            bytes.to_vec()
-        };
+        let packets = buf.copy_to_bytes(len.min(buf.remaining())).to_vec();
         Ok(Self {
             long,
             stream_number,

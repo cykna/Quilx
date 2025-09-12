@@ -1,4 +1,4 @@
-use bytes::{Bytes, BytesMut};
+use bytes::{Buf, Bytes, BytesMut};
 
 use crate::dencode::Dencode;
 #[derive(Debug)]
@@ -16,11 +16,13 @@ impl Crypto {
 impl Dencode for Crypto {
     fn encode(&self, buf: &mut BytesMut) {
         self.offset.encode(buf);
+        (self.data.len() as u64).encode(buf);
         self.data.encode(buf)
     }
     fn decode(buf: &mut Bytes) -> Result<Self, crate::dencode::DencodeError> {
         let offset = u64::decode(buf)?;
-        let data = Bytes::decode(buf)?;
+        let len = u64::decode(buf)? as usize;
+        let data = buf.copy_to_bytes(len);
         Ok(Self::new(offset, data))
     }
 }
