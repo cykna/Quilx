@@ -54,3 +54,39 @@ impl Dencode for u64 {
         Ok(buf.get_u64())
     }
 }
+
+impl<T> Dencode for Vec<T>
+where
+    T: Dencode,
+{
+    fn encode(&self, buf: &mut BytesMut) {
+        for i in self {
+            i.encode(buf);
+        }
+    }
+    fn decode(buf: &mut Bytes) -> Result<Self, DencodeError> {
+        let mut out = Vec::with_capacity(buf.len() / std::mem::size_of::<T>());
+        while buf.remaining() > 0 {
+            out.push(T::decode(buf)?);
+        }
+        Ok(out)
+    }
+}
+
+impl<T, const N: usize> Dencode for [T; N]
+where
+    T: Dencode + std::fmt::Debug,
+{
+    fn encode(&self, buf: &mut BytesMut) {
+        for i in self {
+            i.encode(buf);
+        }
+    }
+    fn decode(buf: &mut Bytes) -> Result<Self, DencodeError> {
+        let mut out = Vec::with_capacity(N);
+        while buf.remaining() > 0 {
+            out.push(T::decode(buf)?);
+        }
+        Ok(out.try_into().unwrap())
+    }
+}
