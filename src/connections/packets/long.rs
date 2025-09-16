@@ -28,7 +28,7 @@ impl From<u8> for LongHeaderType {
 ///Long Header defined in Section 17.2 of QUIC specification, which is used to transfer data between based on it's type.
 ///Note that all the fields are in order of appearance on the QUIC representation of it
 pub struct LongHeader {
-    pub(crate) first_byte: u8, //header, fixed bit, long packet type, type specific are included here in this order
+    pub(crate) first_byte: u8, //header, fixed bit, long packet type, type specific, are included here in this order
     pub(crate) version: u32,
     ///Length of both dest_id and src_id is ommited here, since we can calculate them via `.len()` method, but they are added on the raw bytes.
     ///'conn_dest_id' determines the connection destination id
@@ -63,9 +63,12 @@ impl LongHeader {
     ///Takes the length in bytes this header takes
     pub fn len(&self) -> usize {
         let u8_size = std::mem::size_of::<u8>();
+        //first byte, version, DCID len, DCID, SCID len, SCID
         u8_size
             + std::mem::size_of::<u32>()
+            + u8_size
             + (u8_size * self.conn_dest_id.len())
+            + u8_size
             + (u8_size * self.conn_src_id.len())
     }
 }
@@ -74,22 +77,22 @@ impl Dencode for LongHeader {
     fn encode(&self, buf: &mut bytes::BytesMut) {
         self.first_byte.encode(buf);
         self.version.encode(buf);
-        (self.conn_dest_id.len() as u64).encode(buf);
+        (self.conn_dest_id.len() as u8).encode(buf);
         self.conn_dest_id.encode(buf);
-        (self.conn_src_id.len() as u64).encode(buf);
+        (self.conn_src_id.len() as u8).encode(buf);
         self.conn_src_id.encode(buf);
     }
     fn decode(buf: &mut bytes::Bytes) -> Result<Self, crate::dencode::DencodeError> {
         let first = buf.get_u8();
         let version = buf.get_u32();
         let cdid = {
-            let cdid_len = buf.get_u64();
+            let cdid_len = buf.get_u8();
             let cdid = buf.copy_to_bytes(cdid_len as usize);
             cdid.to_vec()
         };
         //literally the same shit
         let scid = {
-            let scid_len = buf.get_u64();
+            let scid_len = buf.get_u8();
 
             let cdid = buf.copy_to_bytes(scid_len as usize);
             cdid.to_vec()

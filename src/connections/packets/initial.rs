@@ -57,11 +57,15 @@ impl InitialPacket {
     #[inline]
     ///Retrieves the length in bytes this header takes
     pub fn len(&self) -> usize {
-        let u8_len = std::mem::size_of::<u8>();
-        self.long.len()
-            + (u8_len * self.token.len())
-            + (u8_len * self.packets.len())
-            + self.stream_num_len()
+        let out = {
+            let u8_len = std::mem::size_of::<u8>();
+            self.long.len()
+                + (u8_len * self.token.len())
+                + (u8_len * self.packets.len())
+                + self.stream_num_len()
+        };
+        println!("{self:?} {out:?}");
+        out
     }
 
     #[inline]
@@ -107,7 +111,7 @@ impl Dencode for InitialPacket {
                 _ => unreachable!(),
             }
         };
-        let packets = buf.copy_to_bytes(len.min(buf.remaining())).to_vec();
+        let packets = buf.copy_to_bytes(len).to_vec();
         Ok(Self {
             long,
             packet_number,

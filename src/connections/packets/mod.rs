@@ -41,6 +41,13 @@ impl QuicPacket {
             Self::Handshake(hand) => hand.push_frame(frame),
         }
     }
+
+    pub fn len(&self) -> usize {
+        match self {
+            Self::Initial(ini) => ini.len(),
+            Self::Handshake(hand) => hand.len(),
+        }
+    }
 }
 
 impl Dencode for QuicPacket {
@@ -52,11 +59,13 @@ impl Dencode for QuicPacket {
     }
     fn decode(buf: &mut bytes::Bytes) -> Result<Self, crate::dencode::DencodeError> {
         let first_byte = buf[0];
-        //Retrieves the type of the header
-        Ok(match (first_byte >> 4).into() {
+
+        let out = Ok(match (first_byte >> 4).into() {
             LongHeaderType::Initial => Self::Initial(InitialPacket::decode(buf)?),
             LongHeaderType::Handshake => Self::Handshake(HandshakePacket::decode(buf)?),
             ty => unimplemented!("Did not implement decoding for type {ty:?}"),
-        })
+        });
+
+        out
     }
 }

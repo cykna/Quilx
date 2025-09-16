@@ -5,7 +5,7 @@ use std::{
     net::SocketAddr,
 };
 
-use bytes::{Bytes, BytesMut};
+use bytes::{Buf, Bytes, BytesMut};
 
 use crate::{
     connections::{DataType, InitialPacket, QuicConnection, QuicPacket},
@@ -51,6 +51,7 @@ impl QuicEndpoint {
         for packet in packet {
             packet.encode(&mut buf);
         }
+
         if buf.len() < 1200 {
             buf.resize(1200, 0);
         }
@@ -73,13 +74,13 @@ impl QuicEndpoint {
 
         match ty {
             DataType::Packet => {
-                let packet = QuicPacket::decode(data).unwrap();
-                let frames = packet
-                    .frames()
-                    .into_iter()
-                    .filter(|v| !matches!(v, frames::Frame::Padding))
-                    .collect::<Vec<_>>();
-                println!("{frames:?}");
+                let mut remaining = data.remaining();
+                let mut packets = Vec::new();
+                while remaining > 0 {
+                    let packet = QuicPacket::decode(data).unwrap();
+
+                    packets.push(packet);
+                }
             }
         }
         Ok(())
@@ -116,7 +117,7 @@ impl QuicEndpoint {
     pub async fn recv(&mut self) -> std::io::Result<(Bytes, DataType, SocketAddr)> {
         let (buf, addr) = {
             let mut out = BytesMut::zeroed(1200);
-            let (_, addr) = self.udp.recv_from(&mut out).await?;
+            let (size, addr) = self.udp.recv_from(&mut out).await?;
             (out.split().freeze(), addr)
         };
 
