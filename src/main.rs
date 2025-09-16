@@ -5,12 +5,12 @@ use std::{
     net::SocketAddr,
 };
 
-use bytes::{Buf, Bytes, BytesMut};
+use bytes::{Bytes, BytesMut};
 
 use crate::{
     connections::{DataType, InitialPacket, QuicConnection, QuicPacket},
     dencode::Dencode,
-    frames::{Crypto, Stream, stream_id::StreamId},
+    frames::{Crypto, Stream},
 };
 
 mod connections;
@@ -44,24 +44,31 @@ impl QuicEndpoint {
     ///Encoded and sends the packet immediatly, assuming it follows the deffinitions set on the specifications for the MTU
     pub async fn send_immediatly(
         &mut self,
-        packet: QuicPacket,
+        packet: &[QuicPacket],
         addr: SocketAddr,
     ) -> std::io::Result<usize> {
         let mut buf = BytesMut::new();
-        packet.encode(&mut buf);
+        for packet in packet {
+            packet.encode(&mut buf);
+        }
+        if buf.len() < 1200 {
+            buf.resize(1200, 0);
+        }
+
         self.udp.send_to(&buf, addr).await
     }
 
     ///Attempts to connect this Endpoint with an endpoint with the provided address `addr` and returns the connection generated
     pub async fn connect_to(&mut self, addr: SocketAddr) -> std::io::Result<()> {
-        let mut initial = InitialPacket::new();
-        initial.push_frame(frames::Frame::new_crypto(Crypto::new(
+        let mut initial = QuicPacket::initial();
+        initial.push_frame(&frames::Frame::new_crypto(Crypto::new(
             0,
             Bytes::from("Hello World"),
         )));
-        initial.fill_padding();
-        self.send_immediatly(QuicPacket::Initial(initial), addr)
-            .await?;
+
+        let mut handshake = QuicPacket::handshake();
+        handshake.push_frame(&frames::Frame::new_padding());
+        self.send_immediatly(&[initial, handshake], addr).await?;
         let (ref mut data, ty, new_addr) = self.recv().await?;
 
         match ty {
@@ -135,22 +142,18 @@ async fn main() {
                         .into_iter()
                         .filter(|v| !matches!(v, frames::Frame::Padding))
                         .collect::<Vec<_>>();
-                    let frames::Frame::Crypto(_) = frames[0] else {
+                    let frames::Frame::Crypto(ref cryp) = frames[0] else {
                         panic!("Not a crypto")
                     };
+                    println!("received {cryp:?}");
                     let mut packet = InitialPacket::new();
-                    packet.push_frame(frames::Frame::Stream(Stream::new(
-                        StreamId::new(
-                            frames::stream_id::InitiatorType::Server,
-                            frames::stream_id::StreamType::BiDirectional,
-                            0,
-                        ),
+                    packet.push_frame(&frames::Frame::new_crypto(Crypto::new(
                         0,
                         Bytes::copy_from_slice(b"Cool your message buddy"),
                     )));
                     packet.fill_padding();
                     receiver
-                        .send_immediatly(QuicPacket::Initial(packet), addr)
+                        .send_immediatly(&[QuicPacket::Initial(packet)], addr)
                         .await
                         .map_err(EndPointError::Io)?;
                 }
