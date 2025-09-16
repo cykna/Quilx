@@ -73,7 +73,7 @@ impl Dencode for HandshakePacket {
         let mut len = buf.get_u64() as usize;
         let packet_number = {
             let size = long.first_byte & 0b11; //length of stream number
-            len -= size as usize + 1; //len = packets_size + stream_number_size
+            len -= size as usize; //len = packets_size + stream_number_size
             match size {
                 0 => buf.get_u8() as u32,
                 1 => buf.get_u16() as u32,
