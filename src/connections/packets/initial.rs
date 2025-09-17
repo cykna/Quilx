@@ -16,7 +16,7 @@ pub struct InitialPacket {
     ///Numeric value of the packet
     packet_number: u32,
     ///already serialized frames
-    packets: Vec<u8>,
+    pub(crate) packets: Vec<u8>,
 }
 
 impl InitialPacket {
@@ -37,7 +37,7 @@ impl InitialPacket {
     #[inline]
     ///Retrieves the numeric length of the packet number
     pub fn stream_num_len(&self) -> usize {
-        self.long.first_byte as usize & 0b11
+        self.long.first_byte as usize & 0b11 + 1
     }
 
     ///Appends the given `frame` on this packet
@@ -49,8 +49,10 @@ impl InitialPacket {
 
     ///Fills the `packets` of this header with `PADDING` until the length in bytes is the minimum required by QUIC as defined on Section 14.1
     pub fn fill_padding(&mut self) {
-        if self.len() < PACKET_HANDSHAKE_SIZE {
-            self.packets.resize(PACKET_HANDSHAKE_SIZE - self.len(), 0); //0 == Padding, as defined at 19.1
+        let base = self.len() - self.packets.len();
+        if base < PACKET_HANDSHAKE_SIZE {
+            self.packets
+                .extend(std::iter::repeat(0).take(PACKET_HANDSHAKE_SIZE - base)); //0 == Padding, as defined at 19.1
         }
     }
 
@@ -58,13 +60,23 @@ impl InitialPacket {
     ///Retrieves the length in bytes this header takes
     pub fn len(&self) -> usize {
         let out = {
-            let u8_len = std::mem::size_of::<u8>();
+            //long, token len, token, packet len, packet number, packet
+            // println!(
+            //     "{},{},{},{},{},{}",
+            //     self.long.len(),
+            //     std::mem::size_of::<u64>(),
+            //     self.token.len(),
+            //     std::mem::size_of::<u64>(),
+            //     self.packets.len(),
+            //     self.stream_num_len()
+            // );
             self.long.len()
-                + (u8_len * self.token.len())
-                + (u8_len * self.packets.len())
+                + std::mem::size_of::<u64>()
+                + self.token.len()
+                + std::mem::size_of::<u64>()
+                + self.packets.len()
                 + self.stream_num_len()
         };
-        println!("{self:?} {out:?}");
         out
     }
 
@@ -89,6 +101,7 @@ impl Dencode for InitialPacket {
 
         ((self.packets.len() + self.stream_num_len()) as u64).encode(buf);
         self.packet_number.encode(buf);
+
         self.packets.encode(buf);
     }
     fn decode(buf: &mut bytes::Bytes) -> Result<Self, crate::dencode::DencodeError> {
@@ -102,7 +115,7 @@ impl Dencode for InitialPacket {
         let mut len = buf.get_u64() as usize;
         let packet_number = {
             let size = long.first_byte & 0b11; //length of stream number
-            len -= size as usize; //len = packets_size + stream_number_size
+            len -= size as usize + 1;
             match size {
                 0 => buf.get_u8() as u32,
                 1 => buf.get_u16() as u32,
@@ -111,7 +124,9 @@ impl Dencode for InitialPacket {
                 _ => unreachable!(),
             }
         };
+
         let packets = buf.copy_to_bytes(len).to_vec();
+
         Ok(Self {
             long,
             packet_number,

@@ -3,7 +3,7 @@ use bytes::Buf;
 use crate::dencode::Dencode;
 
 ///Enum representation of the types a `LongHeader` can have.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Eq)]
 #[repr(u8)]
 pub enum LongHeaderType {
     Initial,

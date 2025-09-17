@@ -25,7 +25,6 @@ impl Dencode for Crypto {
     fn decode(buf: &mut Bytes) -> Result<Self, crate::dencode::DencodeError> {
         let offset = u64::decode(buf)?;
         let len = u64::decode(buf)? as usize;
-
         let data = buf.copy_to_bytes(len);
         Ok(Self::new(offset, data))
     }

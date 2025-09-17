@@ -5,12 +5,11 @@ use std::{
     net::SocketAddr,
 };
 
-use bytes::{Buf, Bytes, BytesMut};
+use bytes::{Bytes, BytesMut};
 
 use crate::{
-    connections::{DataType, InitialPacket, QuicConnection, QuicPacket},
+    connections::{ConnectionError, DataType, LongHeaderType, QuicConnection, QuicPacket},
     dencode::Dencode,
-    frames::{Crypto, Stream},
 };
 
 mod connections;
@@ -23,6 +22,7 @@ pub enum EndPointError {
     Io(std::io::Error),
 }
 
+#[derive(Debug)]
 pub struct QuicEndpoint {
     connections: HashMap<SocketAddr, QuicConnection>,
     udp: tokio::net::UdpSocket,
@@ -40,50 +40,79 @@ impl QuicEndpoint {
         };
         Ok(data)
     }
-
-    ///Encoded and sends the packet immediatly, assuming it follows the deffinitions set on the specifications for the MTU
+    ///Retrieves the connection with the given `addr`.
+    pub fn retrieve_connection(&self, addr: SocketAddr) -> Option<&QuicConnection> {
+        self.connections.get(&addr)
+    }
+    ///Encoded and sends the packet immediatly, assuming it follows the deffinitions set on the specifications for the MTU.
+    ///If the `packet` size is higher than the defined, the ones that overflowed, won't be sent. If none is passed, then anything is even sent
     pub async fn send_immediatly(
         &mut self,
         packet: &[QuicPacket],
         addr: SocketAddr,
     ) -> std::io::Result<usize> {
         let mut buf = BytesMut::new();
-        for packet in packet {
-            packet.encode(&mut buf);
+        for pckt in packet {
+            if pckt.kind() == LongHeaderType::Initial {
+                let mut buf = BytesMut::new();
+                pckt.encode(&mut buf);
+                self.udp.send_to(&buf[..1200], addr).await?;
+            } else {
+                if buf.len() >= 1200 {
+                    break;
+                }
+                pckt.encode(&mut buf);
+            }
         }
-
-        if buf.len() < 1200 {
-            buf.resize(1200, 0);
+        if buf.len() != 0 {
+            self.udp.send_to(&buf[..buf.len().min(1200)], addr).await
+        } else {
+            Ok(0)
         }
-
-        self.udp.send_to(&buf, addr).await
     }
 
-    ///Attempts to connect this Endpoint with an endpoint with the provided address `addr` and returns the connection generated
-    pub async fn connect_to(&mut self, addr: SocketAddr) -> std::io::Result<()> {
-        let mut initial = QuicPacket::initial();
-        initial.push_frame(&frames::Frame::new_crypto(Crypto::new(
-            0,
-            Bytes::from("Hello World"),
-        )));
-
-        let mut handshake = QuicPacket::handshake();
-        handshake.push_frame(&frames::Frame::new_padding());
-        self.send_immediatly(&[initial, handshake], addr).await?;
-        let (ref mut data, ty, new_addr) = self.recv().await?;
-
-        match ty {
-            DataType::Packet => {
-                let mut remaining = data.remaining();
-                let mut packets = Vec::new();
-                while remaining > 0 {
-                    let packet = QuicPacket::decode(data).unwrap();
-
-                    packets.push(packet);
-                }
+    ///Listen for incomming data and sends them to each Connection it's received. If the sender is not recognized,
+    ///a handshake is made
+    pub async fn listen(&mut self) -> Result<(), ConnectionError> {
+        while let Ok((ref mut bytes, ty, addr)) = self.recv().await {
+            dbg!(self.connections.contains_key(&addr), addr);
+            if let Some(conn) = self.connections.get_mut(&addr) {
+                conn.receive(bytes)
+            } else {
+                self.create_connection_with(addr, bytes, ty).await?;
             }
         }
         Ok(())
+    }
+
+    ///Creates a new connection with the client with the provided `addr` assuming the given `bytes` were it's first ones
+    pub async fn create_connection_with(
+        &mut self,
+        addr: SocketAddr,
+        bytes: &mut Bytes,
+        ty: DataType,
+    ) -> Result<(), ConnectionError> {
+        let mut conn = QuicConnection::new(addr);
+        match QuicPacket::decode(bytes) {
+            Ok(packet) => match ty {
+                DataType::Packet => {
+                    let handshake_packet = conn.handle_initial(packet).unwrap();
+                    self.send_immediatly(&handshake_packet, addr).await.unwrap();
+                }
+            },
+            _ => return Err(ConnectionError::UnexpectedContent),
+        }
+        self.connections.insert(addr, conn);
+        Ok(())
+    }
+
+    ///Attempts to connect this Endpoint with an endpoint with the provided address `addr` and returns the connection generated
+    pub async fn connect_to(&mut self, addr: SocketAddr) -> std::io::Result<&QuicConnection> {
+        let connection = QuicConnection::new(addr);
+        let initial = connection.retrieve_initial();
+        self.send_immediatly(&[initial], addr).await?;
+        self.connections.insert(addr, connection);
+        Ok(self.connections.get(&addr).unwrap())
     }
 
     pub fn append_frame(&mut self, frame: frames::Frame) {
@@ -118,7 +147,8 @@ impl QuicEndpoint {
         let (buf, addr) = {
             let mut out = BytesMut::zeroed(1200);
             let (size, addr) = self.udp.recv_from(&mut out).await?;
-            (out.split().freeze(), addr)
+
+            (out.split().freeze().slice(..size), addr)
         };
 
         //dt == datatype
@@ -134,32 +164,8 @@ impl QuicEndpoint {
 async fn main() {
     let rx = tokio::spawn(async move {
         let mut receiver = QuicEndpoint::new("0.0.0.0:5000".parse().unwrap()).await?;
-        while let Ok((mut buf, dt, addr)) = receiver.recv().await {
-            match dt {
-                DataType::Packet => {
-                    let data = QuicPacket::decode(&mut buf).unwrap();
-                    let frames = data
-                        .frames()
-                        .into_iter()
-                        .filter(|v| !matches!(v, frames::Frame::Padding))
-                        .collect::<Vec<_>>();
-                    let frames::Frame::Crypto(ref cryp) = frames[0] else {
-                        panic!("Not a crypto")
-                    };
-                    println!("received {cryp:?}");
-                    let mut packet = InitialPacket::new();
-                    packet.push_frame(&frames::Frame::new_crypto(Crypto::new(
-                        0,
-                        Bytes::copy_from_slice(b"Cool your message buddy"),
-                    )));
-                    packet.fill_padding();
-                    receiver
-                        .send_immediatly(&[QuicPacket::Initial(packet)], addr)
-                        .await
-                        .map_err(EndPointError::Io)?;
-                }
-            }
-        }
+        receiver.listen().await.unwrap();
+
         Ok(()) as Result<(), EndPointError>
     });
 
@@ -169,18 +175,10 @@ async fn main() {
             .await
             .unwrap();
         writer.connect_to(target).await?;
-        let stdin = std::io::stdin();
-        let mut buf = String::new();
-        while let Ok(s) = stdin.read_line(&mut buf) {
-            writer.append_frame(frames::Frame::Stream(Stream::new_unidirectional(
-                frames::stream_id::InitiatorType::Client,
-                Bytes::copy_from_slice(&buf.as_bytes()[..s]),
-            )));
-            writer.send(target).await.unwrap();
-            buf.clear();
-        }
+        writer.listen().await.unwrap();
+
         Ok(()) as std::io::Result<()>
     });
-    rx.await.unwrap();
-    tx.await.unwrap();
+    rx.await.unwrap().unwrap();
+    tx.await.unwrap().unwrap();
 }

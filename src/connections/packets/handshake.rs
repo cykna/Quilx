@@ -11,7 +11,8 @@ use crate::{
 pub struct HandshakePacket {
     long: LongHeader,
     packet_number: u32,
-    packets: Vec<u8>,
+    ///Already serialized packets
+    pub(crate) packets: Vec<u8>,
 }
 
 impl HandshakePacket {
@@ -29,7 +30,7 @@ impl HandshakePacket {
     #[inline]
     ///Retrieves the numeric length of the stream number of this packet
     pub fn stream_num_len(&self) -> usize {
-        self.long.first_byte as usize & 0b11
+        self.long.first_byte as usize & 0b11 + 1
     }
 
     #[inline]
@@ -58,11 +59,6 @@ impl Dencode for HandshakePacket {
     fn encode(&self, buf: &mut BytesMut) {
         self.long.encode(buf);
 
-        assert!(
-            !self.packets.is_empty(),
-            "Cannot send packet whose size is 0"
-        );
-
         ((self.packets.len() + self.stream_num_len()) as u64).encode(buf);
         self.packet_number.encode(buf);
         self.packets.encode(buf);
@@ -70,10 +66,10 @@ impl Dencode for HandshakePacket {
     fn decode(buf: &mut bytes::Bytes) -> Result<Self, crate::dencode::DencodeError> {
         let long = LongHeader::decode(buf)?;
 
-        let mut len = buf.get_u64() as usize;
+        let len = buf.get_u64() as usize;
         let packet_number = {
             let size = long.first_byte & 0b11; //length of stream number
-            len -= size as usize; //len = packets_size + stream_number_size
+
             match size {
                 0 => buf.get_u8() as u32,
                 1 => buf.get_u16() as u32,
@@ -82,7 +78,7 @@ impl Dencode for HandshakePacket {
                 _ => unreachable!(),
             }
         };
-        let packets = buf.copy_to_bytes(len.min(buf.remaining())).to_vec();
+        let packets = buf.copy_to_bytes(len).to_vec();
         Ok(Self {
             long,
             packet_number,

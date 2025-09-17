@@ -8,3 +8,8 @@ pub use packets::*;
 pub enum DataType {
     Packet,
 }
+
+#[derive(Debug)]
+pub enum ConnectionError {
+    UnexpectedContent,
+}
