@@ -1,4 +1,7 @@
-use std::{io::Cursor, ops::Deref, sync::atomic::AtomicU64};
+use std::{
+    ops::{Deref, Range},
+    sync::atomic::AtomicU64,
+};
 
 use bytes::{Buf, Bytes, BytesMut};
 
@@ -66,6 +69,40 @@ impl Stream {
             ),
             offset: 0,
         }
+    }
+
+    #[inline]
+    ///Creates a new Stream frame containing the underlying data but sliced based on the given `range` starting from the current offset
+    pub fn slice(&self, range: Range<usize>) -> Stream {
+        let offset = self.offset as usize;
+        Self {
+            content: self.content.slice(offset + range.start..range.end + offset),
+            id: self.id,
+            offset: self.offset + range.start as u64,
+        }
+    }
+
+    #[inline]
+    ///Creates a new stream containing the underlying data but going from offset..offset+`amount`
+    pub fn slice_until(&self, amount: usize) -> Stream {
+        let offset = self.offset as usize;
+        Self {
+            content: self.content.slice(offset..amount + offset),
+            id: self.id,
+            offset: self.offset,
+        }
+    }
+    #[inline]
+    ///Moves the offset by `amount` bytes and returns it's new position
+    pub fn move_offset(&mut self, amount: u64) -> u64 {
+        self.offset += amount;
+        self.offset
+    }
+
+    #[inline]
+    ///Retrieves the length of this stream but without counting the payload
+    pub fn size_without_payload(&self) -> usize {
+        std::mem::size_of::<u64>() + std::mem::size_of::<u64>() //offset + id, by now both are u64
     }
 }
 

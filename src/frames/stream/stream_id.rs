@@ -17,6 +17,7 @@ pub enum StreamType {
     BiDirectional,
 }
 
+#[derive(Clone, Copy)]
 ///Struct used to determine the ID of a STREAM frame, based on QUIC specification
 pub struct StreamId(u64);
 impl StreamId {
